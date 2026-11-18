@@ -8,10 +8,19 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from db.repository import create_rule, get_contacts
+from db.repository import consume_rate_limit, create_rule, get_contacts
 
 logger = logging.getLogger(__name__)
 router = Router(name="rules")
+_RULE_LIMIT = 5
+_RULE_WINDOW_SECONDS = 60 * 60
+
+
+async def _allow_rule_creation(user_id: int) -> bool:
+    """Allow at most five rule-creation attempts per user per hour."""
+    return await consume_rate_limit(
+        user_id, "rule_create", _RULE_LIMIT, _RULE_WINDOW_SECONDS
+    )
 
 
 class RuleCreation(StatesGroup):
@@ -27,6 +36,13 @@ class RuleCreation(StatesGroup):
 @router.message(Command("rule"))
 async def begin_rule_creation(message: Message, state: FSMContext) -> None:
     """Start the rule creation flow."""
+    if message.from_user is None:
+        return
+    if not await _allow_rule_creation(message.from_user.id):
+        await message.answer(
+            "Достигнут лимит создания правил (5 в час). Попробуйте позже."
+        )
+        return
     await state.clear()
     await state.set_state(RuleCreation.waiting_for_location)
     await message.answer(
@@ -131,8 +147,8 @@ async def receive_rule_text(message: Message, state: FSMContext) -> None:
     if not text:
         await message.answer("Сообщение должно содержать текст. Введите его ещё раз.")
         return
-    if len(text) > 4000:
-        await message.answer("Текст слишком длинный (максимум 4000 символов).")
+    if len(text) > 500:
+        await message.answer("Текст слишком длинный (максимум 500 символов).")
         return
     await state.update_data(message_text=text)
     data = await state.get_data()

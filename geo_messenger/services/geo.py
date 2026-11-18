@@ -59,21 +59,27 @@ async def check_rules_for_location(
     rules = await get_active_rules(user_id)
     owner_name = await get_user_name(user_id)
     if owner_name is None:
-        logger.warning("Location received for unregistered user %s", user_id)
+        logger.warning("Location received for an unregistered account")
         return
 
     for rule in rules:
+        if rule.owner_id != user_id:
+            logger.error("Skipped a rule with mismatched owner")
+            continue
         try:
             inside = is_inside_radius(
                 lat, lon, rule.latitude, rule.longitude, rule.radius_m
             )
         except ValueError:
-            logger.exception("Invalid coordinates for rule %s", rule.id)
+            logger.exception("Invalid geospatial data in an active rule")
             raise
         if inside == rule.is_inside:
             continue
         updated = await update_rule_inside_if_changed(
-            rule.id, expected_inside=rule.is_inside, new_inside=inside
+            rule.id,
+            owner_id=user_id,
+            expected_inside=rule.is_inside,
+            new_inside=inside,
         )
         if updated and inside:
             await send_notification(
